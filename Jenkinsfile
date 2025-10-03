@@ -1,63 +1,87 @@
-// Use a variable to define the image name once, which makes it easier to manage.
-def DOCKER_REPO = 'barkhalahori/dockerpipeline'
+// Define a variable for the current application version
+def APP_VERSION = "1.0.${env.BUILD_NUMBER}"
 
 pipeline {
-    agent any
+    agent any // This runs the pipeline on any available Jenkins agent
 
     stages {
-        stage("Checkout") {
+        
+        // =================================================================
+        stage('Initialize & Setup') {
             steps {
-                checkout scmGit(branches: [[name: '*/main']], extensions: [], userRemoteConfigs: [[credentialsId: 'github', url: 'https://github.com/barkhalahori/dockerpipeline']])
-                echo 'Code checked out successfully.'
-            }
-        }
-
-        stage("Build Image") {
-            // Define the dynamic tag (e.g., using the build number) for versioning
-            environment {
-                // Defines a Groovy variable to hold the unique tag
-		DOCKER_HOST = 'tcp://host.docker.internal:2375'
-                LATEST_TAG = "${DOCKER_REPO}:latest"
-            }
-            steps {
+                echo "Starting Pipeline for Application Version: ${APP_VERSION}"
+                
+                // Use the 'script' block for more complex Groovy logic
                 script {
+                    // Check if the current environment is Unix-like (most agents)
                     if (isUnix()) {
-                        sh 'docker build -t barkhalahori/dockerpipeline .' 
+                        sh "echo '--- Starting build on a Unix Agent ---'"
                     } else {
-                        bat 'docker build -t barkhalahori/dockerpipeline .'
+                        // Handle Windows environments if needed (using 'bat' command)
+                        bat "echo --- Starting build on a Windows Agent ---"
+                    }
+                }
+            }
+        }
+        
+        // =================================================================
+        stage('Create Artifacts') {
+            steps {
+                echo "Entering Create Artifacts stage..."
+                
+                // Create a temporary file (a mock "artifact") in the workspace
+                sh "echo 'Build successful for version ${APP_VERSION}' > build_info.txt"
+                sh "echo 'File created at: ${WORKSPACE}'"
+            }
+        }
+        
+        // =================================================================
+        stage('Validate Artifact') {
+            steps {
+                echo "Entering Validate Artifact stage..."
+                
+                // Read the contents of the file created in the previous stage
+                script {
+                    // Load the content of the file into a Groovy variable
+                    def artifact_content = readFile('build_info.txt').trim()
+                    
+                    echo "File Content: ${artifact_content}"
+                    
+                    // Simple validation check
+                    if (artifact_content.contains(APP_VERSION)) {
+                        echo "Validation SUCCESS: Artifact content contains the correct version."
+                    } else {
+                        // fail the build if validation is critical
+                        error "Validation FAILURE: Artifact content is missing the version!"
                     }
                 }
             }
         }
 
-        stage('Docker Push') {
+        // =================================================================
+        stage('Deploy Notification') {
             steps {
-                withCredentials([usernamePassword(
-                    credentialsId: 'dockerhub', 
-                    usernameVariable: 'DOCKERHUB_USERNAME',
-                    passwordVariable: 'DOCKERHUB_PASSWORD')]) {
-                    
-                    script {
-                        def login_cmd = "docker login -u ${DOCKERHUB_USERNAME} -p ${DOCKERHUB_PASSWORD}"
-
-                        // 2. Push the uniquely tagged image
-                        def push_tagged_cmd = 'docker push barkhalahori/dockerpipeline'
-
-                        
-
-                        // --- Execution ---
-                        if (isUnix()) {
-                            sh login_cmd
-                            sh push_tagged_cmd
-                            sh 'docker logout' // Logout does not require variables
-                        } else {
-                            bat login_cmd
-                            bat push_tagged_cmd
-                            bat 'docker logout' // Logout does not require variables
-                        }
-                    }
-                }
+                echo "Entering Deploy Notification stage..."
+                echo "The build process is complete. The application is ready for deployment."
             }
+        }
+    }
+    
+    // =================================================================
+    post {
+        // Runs after every build attempt, regardless of the result
+        always {
+            echo 'Cleanup: The pipeline has finished executing.'
+            // Optional: Clean up workspace files
+            // cleanWs()
+        }
+        // Only runs if the build was successful (Status: SUCCESS)
+        success {
+            echo "SUCCESS! Pipeline completed without errors. Version ${APP_VERSION} is ready."
+        }
+        // Only runs if the build failed (Status: FAILURE)
+        failure {
+            echo "FAILURE! Review the logs for errors."
         }
     }
 }
