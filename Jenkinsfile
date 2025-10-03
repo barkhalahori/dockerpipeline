@@ -24,7 +24,7 @@ pipeline {
                     if (isUnix()) {
                         sh 'docker build -t barkhalahori/dockerpipeline .' 
                     } else {
-                        bat 'docker build -t barkhalahori/dockerpipeline ." 
+                        bat 'docker build -t barkhalahori/dockerpipeline .'
                     }
                 }
             }
