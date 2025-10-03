@@ -1,77 +1,84 @@
-// Use a variable to define the image name once, which makes it easier to manage.
-def DOCKER_REPO = 'barkhalahori/dockerpipeline'
+// Use the correct Docker Hub repository name (USER/REPO)
+def DOCKER_REPO = 'barkha2911/dockerpipeline'
+def IMAGE_TAG = "${DOCKER_REPO}:${env.BUILD_NUMBER}" // Unique tag for this build (e.g., barkha2911/dockerpipeline:15)
+def LATEST_TAG = "${DOCKER_REPO}:latest"             // The 'latest' tag
 
 pipeline {
     agent any
+    
+    // Environment variables that apply to the whole pipeline (or just where needed)
+    environment {
+        // You only need DOCKER_HOST if your Jenkins agent is running as a container
+        // and you're using 'Docker-in-Docker' or 'Docker-outside-of-Docker'.
+        // DOCKER_HOST = 'tcp://host.docker.internal:2375' 
+    }
 
     stages {
         stage("Checkout") {
             steps {
-                // Ensure the 'github' credential ID is correct
-                checkout scmGit(branches: [[name: '*/main']], extensions: [], userRemoteConfigs: [[credentialsId: 'github', url: 'https://github.com/barkhalahori/dockerpipeline.git']])
+                checkout scmGit(branches: [[name: '*/main']], extensions: [], userRemoteConfigs: [[credentialsId: 'github', url: 'https://github.com/barkhalahori/dockerpipeline']])
                 echo 'Code checked out successfully.'
             }
         }
 
-        stage("Build Image") {
-            // Define the dynamic tag (e.g., using the build number) for versioning
-            environment {
-                // Defines a Groovy variable to hold the unique tag
-		DOCKER_HOST = 'tcp://host.docker.internal:2375'
-                IMAGE_TAG = "${DOCKER_REPO}:${env.BUILD_NUMBER}" 
-                LATEST_TAG = "${DOCKER_REPO}:latest"
-            }
+        stage("Build & Tag Image") {
             steps {
                 script {
+                    // 1. Build and tag with the unique BUILD_NUMBER
+                    // 2. Also tag it as 'latest'
+                    def build_cmd = "docker build -t ${IMAGE_TAG} -t ${LATEST_TAG} ."
+                    
                     if (isUnix()) {
-                        // Use double quotes (") for variable interpolation
-                        sh "docker build -t ${IMAGE_TAG} ." 
+                        sh build_cmd
                     } else {
-                        // Use double quotes (") for variable interpolation in bat/Windows
-                        bat "docker build -t ${IMAGE_TAG} ." 
+                        bat build_cmd
                     }
                 }
             }
         }
 
-        stage("Docker Push") {
+        stage('Docker Push') {
             steps {
-                // WARNING: There was a missing quote on credentialsId: 'dockerhub'
                 withCredentials([usernamePassword(
-                    credentialsId: 'dockerhub', // Assuming 'dockerhub' is the correct ID
+                    credentialsId: 'dockerhub', // Ensure this ID is correct in Jenkins
                     usernameVariable: 'DOCKERHUB_USERNAME',
                     passwordVariable: 'DOCKERHUB_PASSWORD')]) {
-                    
+                        
                     script {
                         // 1. Login
-                        // Use double quotes (") for the variables
                         def login_cmd = "docker login -u ${DOCKERHUB_USERNAME} -p ${DOCKERHUB_PASSWORD}"
 
-                        // 2. Push the uniquely tagged image
-                        def push_tagged_cmd = "docker push ${IMAGE_TAG}"
-
-                        // 3. Tag the build image as 'latest' for convenience
-                        def tag_latest_cmd = "docker tag ${IMAGE_TAG} ${LATEST_TAG}"
-
-                        // 4. Push the 'latest' tag
-                        def push_latest_cmd = "docker push ${LATEST_TAG}"
+                        // 2. Define the push commands
+                        def push_versioned_cmd = "docker push ${IMAGE_TAG}" // Push the specific version
+                        def push_latest_cmd    = "docker push ${LATEST_TAG}"  // Push the latest tag
 
                         // --- Execution ---
                         if (isUnix()) {
                             sh login_cmd
-                            sh push_tagged_cmd
-                            sh tag_latest_cmd
-                            sh push_latest_cmd 
-                            sh 'docker logout' // Logout does not require variables
+                            sh push_versioned_cmd // Push the versioned tag
+                            sh push_latest_cmd     // Push the latest tag
+                            sh 'docker logout'
                         } else {
                             bat login_cmd
-                            bat push_tagged_cmd
-                            bat tag_latest_cmd
+                            bat push_versioned_cmd
                             bat push_latest_cmd
-                            bat 'docker logout' // Logout does not require variables
+                            bat 'docker logout'
                         }
                     }
                 }
+            }
+        }
+        
+        stage('Run/Test Container') {
+            steps {
+                echo "Testing image ${IMAGE_TAG}"
+                // Add your testing step here, for example:
+                sh "docker run -d -p 8080:3000 --name ci-test-app ${IMAGE_TAG}"
+                // Add a sleep or a curl command to hit the container endpoint
+                // sh "sleep 5"
+                // sh "curl -s http://localhost:8080 | grep 'Welcome to Express'" 
+                sh "docker stop ci-test-app"
+                sh "docker rm ci-test-app"
             }
         }
     }
