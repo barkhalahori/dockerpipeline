@@ -34,6 +34,16 @@ pipeline {
                 sh "echo 'File created at: ${WORKSPACE}'"
             }
         }
+
+	stage('Intentional Failure') {
+            steps {
+                echo "Stage 3: Attempting a critical operation that will fail..."
+                // The 'exit 1' command immediately stops the shell script 
+                // and sends a failure signal back to Jenkins.
+                sh 'exit 1' 
+                echo "This message will NOT be displayed." // This line is never reached
+            }
+        }
         
         // =================================================================
         stage('Validate Artifact') {
