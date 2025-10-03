@@ -1,41 +1,33 @@
+// Use a variable to define the image name once, which makes it easier to manage.
+def DOCKER_REPO = 'barkhalahori/dockerpipeline'
+
 pipeline {
-    // Defines where the pipeline runs (on any available agent/node)
     agent any
-
-    // Defines variables used throughout the script
-    environment {
-        // !!! Ensure 'github' is the ID of your GitHub credentials in Jenkins !!!
-        GITHUB_CREDENTIAL_ID = 'github' 
-
-        // !!! Ensure 'dockerhub' is the ID of your Docker Hub credentials in Jenkins !!!
-        DOCKERHUB_CREDENTIAL_ID = 'dockerhub' 
-
-        // !!! CHANGE THIS to your Docker Hub username/image name !!!
-        DOCKER_IMAGE_NAME = 'barkha2911/jenkins'
-    }
 
     stages {
         stage("Checkout") {
             steps {
-                // Checkout the code using the GitHub credentials and URL defined in the environment or job config.
-                // NOTE: Using checkout scm requires the 'Pipeline script from SCM' job definition.
-                // The provided checkout step is complex and redundant if using 'Pipeline script from SCM'.
-                // Using 'checkout scm' is cleaner for SCM-based pipelines:
-                checkout scm
+                // Ensure the 'github' credential ID is correct
+                checkout scmGit(branches: [[name: '*/main']], extensions: [], userRemoteConfigs: [[credentialsId: 'github', url: 'https://github.com/barkhalahori/dockerpipeline.git']])
                 echo 'Code checked out successfully.'
             }
         }
 
         stage("Build Image") {
+            // Define the dynamic tag (e.g., using the build number) for versioning
+            environment {
+                // Defines a Groovy variable to hold the unique tag
+                IMAGE_TAG = "${DOCKER_REPO}:${env.BUILD_NUMBER}" 
+                LATEST_TAG = "${DOCKER_REPO}:latest"
+            }
             steps {
                 script {
-                    // Build the Docker image, tagging it with the Jenkins BUILD_NUMBER for versioning
-                    def imageTag = "${env.DOCKER_IMAGE_NAME}:${env.BUILD_NUMBER}"
-                    
                     if (isUnix()) {
-                        sh "docker build -t ${imageTag} ."
+                        // Use double quotes (") for variable interpolation
+                        sh "docker build -t ${IMAGE_TAG} ." 
                     } else {
-                        bat "docker build -t ${imageTag} ."
+                        // Use double quotes (") for variable interpolation in bat/Windows
+                        bat "docker build -t ${IMAGE_TAG} ." 
                     }
                 }
             }
@@ -43,30 +35,39 @@ pipeline {
 
         stage("Docker Push") {
             steps {
-                // Use the withCredentials block to securely expose Docker Hub username/password
+                // WARNING: There was a missing quote on credentialsId: 'dockerhub'
                 withCredentials([usernamePassword(
-                    credentialsId: env.DOCKERHUB_CREDENTIAL_ID,
+                    credentialsId: 'dockerhub', // Assuming 'dockerhub' is the correct ID
                     usernameVariable: 'DOCKERHUB_USERNAME',
                     passwordVariable: 'DOCKERHUB_PASSWORD')]) {
                     
                     script {
-                        def imageTag = "${env.DOCKER_IMAGE_NAME}:${env.BUILD_NUMBER}"
-                        def latestTag = "${env.DOCKER_IMAGE_NAME}:latest"
-                        
+                        // 1. Login
+                        // Use double quotes (") for the variables
+                        def login_cmd = "docker login -u ${DOCKERHUB_USERNAME} -p ${DOCKERHUB_PASSWORD}"
+
+                        // 2. Push the uniquely tagged image
+                        def push_tagged_cmd = "docker push ${IMAGE_TAG}"
+
+                        // 3. Tag the build image as 'latest' for convenience
+                        def tag_latest_cmd = "docker tag ${IMAGE_TAG} ${LATEST_TAG}"
+
+                        // 4. Push the 'latest' tag
+                        def push_latest_cmd = "docker push ${LATEST_TAG}"
+
+                        // --- Execution ---
                         if (isUnix()) {
-                            // Login, push both the build number tag and 'latest' tag, then logout
-                            sh "docker login -u ${DOCKERHUB_USERNAME} -p ${DOCKERHUB_PASSWORD}"
-                            sh "docker push ${imageTag}"
-                            sh "docker tag ${imageTag} ${latestTag}"
-                            sh "docker push ${latestTag}"
-                            sh "docker logout"
+                            sh login_cmd
+                            sh push_tagged_cmd
+                            sh tag_latest_cmd
+                            sh push_latest_cmd 
+                            sh 'docker logout' // Logout does not require variables
                         } else {
-                            // Windows/Bat commands
-                            bat "docker login -u ${DOCKERHUB_USERNAME} -p ${DOCKERHUB_PASSWORD}"
-                            bat "docker push ${imageTag}"
-                            bat "docker tag ${imageTag} ${latestTag}"
-                            bat "docker push ${latestTag}"
-                            bat "docker logout"
+                            bat login_cmd
+                            bat push_tagged_cmd
+                            bat tag_latest_cmd
+                            bat push_latest_cmd
+                            bat 'docker logout' // Logout does not require variables
                         }
                     }
                 }
