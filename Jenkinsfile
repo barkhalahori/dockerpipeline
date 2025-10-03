@@ -17,6 +17,7 @@ pipeline {
             // Define the dynamic tag (e.g., using the build number) for versioning
             environment {
                 // Defines a Groovy variable to hold the unique tag
+		DOCKER_HOST = 'tcp://host.docker.internal:2375'
                 IMAGE_TAG = "${DOCKER_REPO}:${env.BUILD_NUMBER}" 
                 LATEST_TAG = "${DOCKER_REPO}:latest"
             }
